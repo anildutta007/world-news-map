@@ -102,11 +102,9 @@ def fetch_live_news_rss(country_name, category='all', limit=5):
 
     base_query = cat_queries.get(category.lower(), f'"{country_name}" news')
     
-    # Primary attempt: strictly last 48 hours (when:48h)
-    # Secondary fallback for smaller nations: when:72h (last 3 days max)
+    # Strictly last 48 hours (when:48h)
     attempts = [
-        (f'{base_query} when:48h', 48.0),
-        (f'{base_query} when:72h', 72.0)
+        (f'{base_query} when:48h', 48.0)
     ]
 
     items = []
@@ -328,4 +326,5 @@ def start_server(auto_open=True):
         sys.exit(0)
 
 if __name__ == "__main__":
-    start_server(auto_open=True)
+    auto_open = '--no-browser' not in sys.argv
+    start_server(auto_open=auto_open)

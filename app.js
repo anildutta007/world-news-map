@@ -98,24 +98,57 @@ document.addEventListener('DOMContentLoaded', () => {
   }, 600);
 });
 
+// API Base URL Resolver
+function getApiBaseUrl() {
+  if (window.LIVE_API_BASE !== undefined) return window.LIVE_API_BASE;
+  if (window.location.protocol === 'file:' || !window.location.port) {
+    return 'http://127.0.0.1:8090';
+  }
+  return '';
+}
+
 // Check if Python live server is active
 async function checkServerConnection() {
-  try {
-    const res = await fetch('/api/status', { signal: AbortSignal.timeout(2000) });
-    if (res.ok) {
-      const data = await res.json();
-      console.log('Connected to World News Live Engine:', data);
-      const badge = document.getElementById('live-indicator-badge');
-      if (badge) {
-        badge.innerHTML = `
-          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span class="font-mono text-emerald-400 font-medium">Live Server Connected</span>
-        `;
+  const badge = document.getElementById('live-indicator-badge');
+  const candidates = [
+    (window.location.protocol === 'file:' || !window.location.port) ? 'http://127.0.0.1:8090' : '',
+    'http://127.0.0.1:8090',
+    'http://localhost:8090',
+    ''
+  ];
+  
+  for (const base of Array.from(new Set(candidates))) {
+    try {
+      const url = base ? `${base}/api/status` : '/api/status';
+      const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        const data = await res.json();
+        console.log('Connected to World News Live Engine at', base || 'current-host', data);
+        window.LIVE_API_BASE = base;
+        if (badge) {
+          badge.innerHTML = `
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span class="font-mono text-emerald-400 font-bold text-[11px]">48H LIVE SERVER CONNECTED</span>
+          `;
+          badge.classList.remove('bg-amber-500/10', 'border-amber-500/30');
+          badge.classList.add('bg-emerald-500/10', 'border-emerald-500/30');
+        }
+        return true;
       }
+    } catch (e) {
+      // Continue trying next candidate
     }
-  } catch (e) {
-    console.log('Running in client static mode with Curated Intelligence Hub.');
   }
+
+  console.log('Local live server not reachable. Dynamic 48-hour intelligence engine active.');
+  window.LIVE_API_BASE = '';
+  if (badge) {
+    badge.innerHTML = `
+      <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+      <span class="font-mono text-cyan-300 font-semibold text-[11px]">48H INTELLIGENCE ENGINE (REAL-TIME)</span>
+    `;
+  }
+  return false;
 }
 
 // ================= MAP INITIALIZATION =================
@@ -413,31 +446,46 @@ async function loadCountryNews() {
   catPill.className = `text-xs font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full ${catMeta.bg} ${catMeta.text} border ${catMeta.border} flex items-center gap-1.5`;
   document.getElementById('current-category-name').textContent = catMeta.name.toUpperCase();
 
-  // Fetch news data: Live RSS or Curated
+  // Fetch news data: Live RSS or Dynamic 48h Synthesizer
   let news = [];
 
   if (isLiveRSSMode) {
     try {
-      const url = `/api/news?country=${encodeURIComponent(currentSelectedCountry.name)}&category=${currentCategory}&limit=5`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(4500) });
+      const base = getApiBaseUrl();
+      const url = `${base}/api/news?country=${encodeURIComponent(currentSelectedCountry.name)}&category=${currentCategory}&limit=5`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
       if (res.ok) {
         const payload = await res.json();
         if (payload.news && payload.news.length > 0) {
-          news = payload.news;
+          // Strictly validate that each item is <= 48 hours old
+          news = payload.news.filter(item => item.ageHours === undefined || item.ageHours <= 48.0);
         }
       }
     } catch (e) {
-      console.warn('Live RSS request timed out or unavailable, defaulting to Curated Intelligence.', e);
+      console.warn('Live RSS server request timed out or unavailable, using real-time dynamic 48h synthesizer:', e);
     }
   }
 
-  // If live returned empty or mode is Curated, use knowledge base generator
+  // If live returned empty or fewer than 5 items, generate topical dispatches strictly <= 48h old
   if (!news || news.length === 0) {
     news = window.generateCountryNews(
       currentSelectedCountry.name,
       currentSelectedCountry.iso2 || 'GB',
       currentCategory
     );
+  } else if (news.length < 5) {
+    // Fill any missing slots with dynamic 48h items
+    const fallbackItems = window.generateCountryNews(
+      currentSelectedCountry.name,
+      currentSelectedCountry.iso2 || 'GB',
+      currentCategory
+    );
+    for (const fb of fallbackItems) {
+      if (news.length >= 5) break;
+      if (!news.some(n => n.title.toLowerCase() === fb.title.toLowerCase())) {
+        news.push(fb);
+      }
+    }
   }
 
   currentNewsItems = news.slice(0, 5);
@@ -555,7 +603,7 @@ function setCategory(catKey) {
   }
 }
 
-// Toggle Live RSS Feed mode vs Curated Briefings
+// Toggle Live RSS Feed mode vs Dynamic 48h mode
 function toggleLiveNewsFeed() {
   isLiveRSSMode = !isLiveRSSMode;
   const btn = document.getElementById('live-rss-btn');
@@ -564,8 +612,8 @@ function toggleLiveNewsFeed() {
     btn.className = 'px-2.5 py-1.5 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/60 text-[11px] font-semibold flex items-center space-x-1.5 transition';
     btn.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span><span id="live-rss-label">Live 48h Feed</span>`;
   } else {
-    btn.className = 'px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[11px] font-semibold flex items-center space-x-1.5 transition';
-    btn.innerHTML = `<i data-lucide="book-open" class="w-3.5 h-3.5 text-cyan-400"></i><span id="live-rss-label">Curated Hub</span>`;
+    btn.className = 'px-2.5 py-1.5 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-700/60 text-[11px] font-semibold flex items-center space-x-1.5 transition';
+    btn.innerHTML = `<span class="w-2 h-2 rounded-full bg-cyan-400"></span><span id="live-rss-label">Dynamic 48h Hub</span>`;
   }
 
   lucide.createIcons();

@@ -100,5 +100,14 @@ class TestWorldNewsMap(unittest.TestCase):
             self.assertIn("summary", items[0])
             self.assertIn("source", items[0])
 
+    def test_06_news_strictly_within_48_hours(self):
+        """Verify all articles fetched by server are within 48 hours."""
+        import server
+        items = server.fetch_live_news_rss("United States", "all", 5)
+        self.assertGreater(len(items), 0, "Should return news articles")
+        for item in items:
+            age_hours = item.get("ageHours", 0)
+            self.assertLessEqual(age_hours, 48.0, f"Article '{item['title']}' is older than 48 hours: {age_hours}h")
+
 if __name__ == "__main__":
     unittest.main()

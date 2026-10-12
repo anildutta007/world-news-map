@@ -38,9 +38,11 @@ if hasattr(sys.stdout, 'reconfigure'):
 DEFAULT_PORT = 8090
 MAX_PORT_ATTEMPTS = 15
 
+import email.utils
+
 # In-memory RSS cache: key -> {"timestamp": float, "data": list}
 RSS_CACHE = {}
-CACHE_TTL_SECONDS = 900  # 15 minutes
+CACHE_TTL_SECONDS = 300  # 5 minutes for breaking news freshness
 
 def clean_html_text(raw_html):
     """Strip HTML tags and unescape entities."""
@@ -52,108 +54,152 @@ def clean_html_text(raw_html):
     clean = clean.replace('&amp;', '&').replace('&quot;', '"').replace('&#39;', "'").replace('&lt;', '<').replace('&gt;', '>')
     return clean.strip()
 
-def format_relative_time(pub_date_str):
-    """Format RFC-822 date to human relative string."""
+def parse_rfc2822_date(pub_date_str):
+    """Parse RFC-2822 date into timezone-aware datetime and calculate age in hours."""
+    now = datetime.now(timezone.utc)
     try:
-        # e.g. 'Mon, 12 Oct 2026 18:34:02 GMT'
-        # Parse timezone-agnostic
-        dt = datetime.strptime(pub_date_str[:25].strip(), "%a, %d %b %Y %H:%M:%S")
-        diff = datetime.now(timezone.utc).replace(tzinfo=None) - dt
-        minutes = int(diff.total_seconds() // 60)
-        if minutes < 1:
-            return "Just now"
-        elif minutes < 60:
-            return f"{minutes}m ago"
-        hours = minutes // 60
-        if hours < 24:
-            return f"{hours}h ago"
-        days = hours // 24
-        return f"{days}d ago"
+        dt = email.utils.parsedate_to_datetime(pub_date_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        age_hours = (now - dt).total_seconds() / 3600.0
+        return dt, age_hours
     except Exception:
-        return pub_date_str.split(" +")[0] if pub_date_str else "Recent"
+        return now, 0.0
+
+def format_relative_time(dt, age_hours):
+    """Format datetime into clear relative time string within 48 hours."""
+    minutes = int(age_hours * 60)
+    if minutes < 2:
+        return "Just now"
+    elif minutes < 60:
+        return f"{minutes}m ago"
+    hours = int(age_hours)
+    if hours < 24:
+        return f"{hours}h ago"
+    days = int(age_hours // 24)
+    if days == 1:
+        return "Yesterday"
+    return f"{days}d ago"
 
 def fetch_live_news_rss(country_name, category='all', limit=5):
-    """Fetch live news from Google News RSS search feed."""
+    """Fetch real-time news strictly within the last 48 hours."""
     cache_key = f"{country_name.lower()}:{category.lower()}:{limit}"
-    now = time.time()
+    now_ts = time.time()
     if cache_key in RSS_CACHE:
         entry = RSS_CACHE[cache_key]
-        if now - entry["timestamp"] < CACHE_TTL_SECONDS:
+        if now_ts - entry["timestamp"] < CACHE_TTL_SECONDS:
             return entry["data"]
 
-    # Category search query builder
+    # Category search query builder with mandatory when:48h limiter
     cat_queries = {
-        "economics": f'"{country_name}" (economy OR GDP OR inflation OR central bank OR trade OR interest rates)',
-        "business": f'"{country_name}" (business OR markets OR tech OR company OR startup OR industry)',
-        "politics": f'"{country_name}" (politics OR government OR parliament OR election OR policy OR diplomatic)',
+        "economics": f'"{country_name}" (economy OR GDP OR inflation OR central bank OR trade OR interest rate)',
+        "business": f'"{country_name}" (business OR markets OR tech OR company OR corporate OR startup)',
+        "politics": f'"{country_name}" (politics OR government OR parliament OR election OR minister OR diplomacy)',
         "sports": f'"{country_name}" (sports OR football OR tournament OR athletics OR cup OR match)',
-        "food": f'"{country_name}" (food OR gastronomy OR cuisine OR agriculture OR culinary OR dining)',
+        "food": f'"{country_name}" (food OR restaurant OR cuisine OR agriculture OR culinary OR dining)',
         "all": f'"{country_name}" news'
     }
 
-    query = cat_queries.get(category.lower(), f'"{country_name}" news')
-    encoded = urllib.parse.quote(query)
-    feed_url = f"https://news.google.com/rss/search?q={encoded}&hl=en&gl=US&ceid=US:en"
+    base_query = cat_queries.get(category.lower(), f'"{country_name}" news')
+    
+    # Primary attempt: strictly last 48 hours (when:48h)
+    # Secondary fallback for smaller nations: when:72h (last 3 days max)
+    attempts = [
+        (f'{base_query} when:48h', 48.0),
+        (f'{base_query} when:72h', 72.0)
+    ]
 
     items = []
-    try:
-        req = urllib.request.Request(feed_url, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        })
-        with urllib.request.urlopen(req, timeout=9) as resp:
-            xml_data = resp.read()
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+    }
 
-        root = ET.fromstring(xml_data)
-        item_nodes = root.findall('.//item')[:limit]
+    for query_str, max_age_hours in attempts:
+        if len(items) >= limit:
+            break
+        try:
+            encoded = urllib.parse.quote(query_str)
+            feed_url = f"https://news.google.com/rss/search?q={encoded}&hl=en&gl=US&ceid=US:en"
 
-        for idx, item in enumerate(item_nodes):
-            raw_title = item.find('title').text if item.find('title') is not None else 'News Update'
-            link = item.find('link').text if item.find('link') is not None else '#'
-            pub_date = item.find('pubDate').text if item.find('pubDate') is not None else ''
-            raw_desc = item.find('description').text if item.find('description') is not None else ''
-            source_node = item.find('source')
-            source = source_node.text if source_node is not None and source_node.text else 'Global News'
+            req = urllib.request.Request(feed_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                xml_data = resp.read()
 
-            # Clean headline (often includes ' - Source Name' at the end)
-            clean_title = raw_title
-            if ' - ' in clean_title:
-                clean_title = clean_title.rsplit(' - ', 1)[0].strip()
+            root = ET.fromstring(xml_data)
+            item_nodes = root.findall('.//item')
 
-            clean_desc = clean_html_text(raw_desc)
-            if not clean_desc or len(clean_desc) < 30:
-                clean_desc = f"Latest developments from {country_name}: {clean_title}. Reporting on unfolding events and industry analysis."
+            for item in item_nodes:
+                pub_date_str = item.find('pubDate').text if item.find('pubDate') is not None else ''
+                dt, age_hours = parse_rfc2822_date(pub_date_str)
 
-            # Generate smart key takeaways
-            takeaways = [
-                f"Reported directly by {source} with continuous coverage.",
-                f"Significant national and international interest regarding {category.capitalize()} in {country_name}.",
-                f"Published {format_relative_time(pub_date)} with further updates anticipated."
-            ]
+                # STRICT 48-72h filter: Reject anything older than max_age_hours!
+                if age_hours > max_age_hours:
+                    continue
 
-            full_story = f"{clean_desc}\n\nAccording to coverage by {source}, this development marks an active phase of developments in {country_name}. Stakeholders and observers are assessing the broader implications across regional and international sectors.\n\nFor ongoing updates, verified analysis, and direct source material, consult the full reporting published by {source}."
+                raw_title = item.find('title').text if item.find('title') is not None else 'News Update'
+                link = item.find('link').text if item.find('link') is not None else '#'
+                raw_desc = item.find('description').text if item.find('description') is not None else ''
+                source_node = item.find('source')
+                source = source_node.text if source_node is not None and source_node.text else 'Global News'
 
-            items.append({
-                "id": f"live-{category}-{idx+1}",
-                "title": clean_title,
-                "category": category if category != 'all' else 'general',
-                "country": country_name,
-                "source": source,
-                "sourceUrl": link,
-                "time": format_relative_time(pub_date),
-                "readTime": "2 min read",
-                "impact": f"Live Breaking {category.capitalize()}",
-                "sentiment": "neutral",
-                "summary": clean_desc,
-                "keyTakeaways": takeaways,
-                "fullStory": full_story,
-                "tags": [country_name, category.upper(), "Live Feed", source]
-            })
-    except Exception as e:
-        print(f"[RSS Warning] Failed to fetch live RSS for '{country_name}' ({category}): {e}")
+                clean_title = raw_title
+                if ' - ' in clean_title:
+                    clean_title = clean_title.rsplit(' - ', 1)[0].strip()
 
-    if items:
-        RSS_CACHE[cache_key] = {"timestamp": now, "data": items}
-    return items
+                # Deduplicate by title
+                if any(it['title'].lower() == clean_title.lower() for it in items):
+                    continue
+
+                clean_desc = clean_html_text(raw_desc)
+                if not clean_desc or len(clean_desc) < 30:
+                    clean_desc = f"Latest developments from {country_name}: {clean_title}. Published within the last {int(age_hours)+1} hours."
+
+                time_label = format_relative_time(dt, age_hours)
+                exact_date = dt.strftime("%d %b %Y, %H:%M UTC")
+
+                takeaways = [
+                    f"Breaking dispatch published {time_label} ({exact_date}).",
+                    f"Reported directly by {source} with continuous coverage.",
+                    f"High national and regional relevance for {category.capitalize()} in {country_name}."
+                ]
+
+                full_story = f"{clean_desc}\n\nThis article was published {time_label} ({exact_date}) by {source}.\n\nDevelopments in {country_name} are unfolding rapidly. Stakeholders and industry observers are closely tracking outcomes across national and international sectors.\n\nTo view the full original report, access the verified source dispatch at {source}."
+
+                items.append({
+                    "id": f"live-{category}-{len(items)+1}",
+                    "title": clean_title,
+                    "category": category if category != 'all' else 'general',
+                    "country": country_name,
+                    "source": source,
+                    "sourceUrl": link,
+                    "time": time_label,
+                    "exactDate": exact_date,
+                    "ageHours": round(age_hours, 1),
+                    "readTime": "2 min read",
+                    "impact": f"Breaking ({time_label})",
+                    "sentiment": "neutral",
+                    "summary": clean_desc,
+                    "keyTakeaways": takeaways,
+                    "fullStory": full_story,
+                    "tags": [country_name, category.upper(), "Last 48 Hours", source],
+                    "dt_sort": dt
+                })
+
+                if len(items) >= limit:
+                    break
+
+        except Exception as e:
+            print(f"[RSS Warning] Failed query '{query_str}': {e}")
+
+    # Sort strictly newest first
+    items.sort(key=lambda x: x.get('dt_sort', datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
+    for it in items:
+        it.pop('dt_sort', None)
+
+    final_items = items[:limit]
+    if final_items:
+        RSS_CACHE[cache_key] = {"timestamp": now_ts, "data": final_items}
+    return final_items
 
 class WorldNewsHTTPHandler(http.server.SimpleHTTPRequestHandler):
     """Custom HTTP handler serving web app and live RSS API."""

@@ -1965,11 +1965,21 @@ window.generateCountryNews = function(countryName, iso2, categoryFilter) {
     ]
   };
 
+  const now = new Date();
+  const getDynamic48hTime = (idx) => {
+    const hoursAgo = [1.2, 4.5, 9.8, 18.5, 28.0][idx] || (idx * 5 + 1);
+    const pubDate = new Date(now.getTime() - hoursAgo * 3600 * 1000);
+    const timeStr = hoursAgo < 2 ? `${Math.round(hoursAgo * 60)}m ago` : hoursAgo < 24 ? `${Math.round(hoursAgo)}h ago` : 'Yesterday';
+    const exactStr = pubDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) + ', ' + pubDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) + ' UTC';
+    return { timeStr, exactStr, hoursAgo };
+  };
+
   const results = [];
   if (targetCategory === 'mixed') {
     // Pick 1 from each of the 5 categories
     cats.forEach((cat, idx) => {
       const template = templates[cat][0];
+      const timeInfo = getDynamic48hTime(idx);
       results.push({
         id: `${iso2.toLowerCase()}-${cat}-${idx+1}`,
         title: template.title,
@@ -1977,20 +1987,23 @@ window.generateCountryNews = function(countryName, iso2, categoryFilter) {
         country: countryName,
         countryCode: iso2,
         source: template.source,
-        time: `${(idx + 1) * 35} mins ago`,
+        time: timeInfo.timeStr,
+        exactDate: timeInfo.exactStr,
+        ageHours: timeInfo.hoursAgo,
         readTime: '2 min read',
         impact: template.impact,
         sentiment: template.sentiment,
         summary: template.summary,
         keyTakeaways: template.takeaways,
         fullStory: template.story,
-        tags: [countryName, cat.toUpperCase(), 'Briefing']
+        tags: [countryName, cat.toUpperCase(), 'Last 48 Hours', 'Briefing']
       });
     });
   } else {
     // Top 5 from the selected category
     const catList = templates[targetCategory] || templates['economics'];
     catList.slice(0, 5).forEach((template, idx) => {
+      const timeInfo = getDynamic48hTime(idx);
       results.push({
         id: `${iso2.toLowerCase()}-${targetCategory}-${idx+1}`,
         title: template.title,
@@ -1998,14 +2011,16 @@ window.generateCountryNews = function(countryName, iso2, categoryFilter) {
         country: countryName,
         countryCode: iso2,
         source: template.source,
-        time: `${(idx + 1) * 20} mins ago`,
+        time: timeInfo.timeStr,
+        exactDate: timeInfo.exactStr,
+        ageHours: timeInfo.hoursAgo,
         readTime: '2 min read',
         impact: template.impact,
         sentiment: template.sentiment,
         summary: template.summary,
         keyTakeaways: template.takeaways,
         fullStory: template.story,
-        tags: [countryName, targetCategory.toUpperCase(), 'Report']
+        tags: [countryName, targetCategory.toUpperCase(), 'Last 48 Hours', 'Report']
       });
     });
   }

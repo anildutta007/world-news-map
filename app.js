@@ -26,7 +26,7 @@ let currentSelectedCountry = null; // { name, iso2, iso3, capital, lat, lng, fla
 let currentCategory = 'all'; // 'all', 'economics', 'business', 'politics', 'sports', 'food'
 let currentNewsItems = [];
 let currentModalStoryIndex = 0;
-let isLiveRSSMode = false;
+let isLiveRSSMode = true; // Default to real-time dispatches strictly within the last 48 hours
 let clockInterval = null;
 
 // Speech Synthesis State
@@ -473,11 +473,15 @@ function renderNewsCards(items) {
             <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${meta.bg} ${meta.text} border ${meta.border}">
               ${meta.name}
             </span>
+            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-800/60 text-[9px] font-bold">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>48H WIRE</span>
+            </span>
           </div>
           <div class="flex items-center space-x-1.5 text-[11px] text-slate-400 font-medium">
-            <span class="text-slate-200 font-semibold truncate max-w-[140px]">${item.source || 'Verified Source'}</span>
+            <span class="text-slate-200 font-semibold truncate max-w-[130px]">${item.source || 'Verified Source'}</span>
             <span>•</span>
-            <span class="font-mono">${item.time || 'Recent'}</span>
+            <span class="font-mono text-cyan-300 font-bold bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-800/60">${item.time || 'Today'}</span>
           </div>
         </div>
 
@@ -497,9 +501,9 @@ function renderNewsCards(items) {
         <!-- Impact Tag & Read Time -->
         <div class="mt-3 flex items-center justify-between text-[11px]">
           <div class="flex items-center space-x-2">
-            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-medium">
-              <i data-lucide="gauge" class="w-3 h-3 text-purple-400"></i>
-              <span>${item.impact || 'Regional Impact'}</span>
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-mono">
+              <i data-lucide="clock" class="w-3 h-3 text-emerald-400"></i>
+              <span>${item.exactDate ? item.exactDate : (item.time || 'Latest 48h')}</span>
             </span>
             <span class="text-slate-400 font-mono text-[10px]">${item.readTime || '2 min read'}</span>
           </div>
@@ -555,16 +559,16 @@ function setCategory(catKey) {
 function toggleLiveNewsFeed() {
   isLiveRSSMode = !isLiveRSSMode;
   const btn = document.getElementById('live-rss-btn');
-  const label = document.getElementById('live-rss-label');
 
   if (isLiveRSSMode) {
-    btn.className = 'px-2.5 py-1.5 rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-700/60 text-[11px] font-semibold flex items-center space-x-1 transition';
-    label.textContent = 'Live RSS Active';
+    btn.className = 'px-2.5 py-1.5 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/60 text-[11px] font-semibold flex items-center space-x-1.5 transition';
+    btn.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span><span id="live-rss-label">Live 48h Feed</span>`;
   } else {
-    btn.className = 'px-2.5 py-1.5 rounded-lg bg-cyan-950/70 hover:bg-cyan-900 text-cyan-300 border border-cyan-700/50 text-[11px] font-semibold flex items-center space-x-1 transition';
-    label.textContent = 'Live RSS';
+    btn.className = 'px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[11px] font-semibold flex items-center space-x-1.5 transition';
+    btn.innerHTML = `<i data-lucide="book-open" class="w-3.5 h-3.5 text-cyan-400"></i><span id="live-rss-label">Curated Hub</span>`;
   }
 
+  lucide.createIcons();
   loadCountryNews();
 }
 
@@ -598,7 +602,7 @@ function openReaderModal(storyIndex) {
   catBadge.className = `px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${meta.bg} ${meta.text} border ${meta.border}`;
 
   document.getElementById('modal-source-name').textContent = story.source || 'Global Bureau';
-  document.getElementById('modal-time-stamp').textContent = story.time || 'Recent';
+  document.getElementById('modal-time-stamp').textContent = story.exactDate ? `${story.time} • ${story.exactDate}` : (story.time || 'Recent');
   document.getElementById('modal-read-time').textContent = story.readTime || '3 min read';
   document.getElementById('modal-article-title').textContent = story.title;
 

@@ -35,31 +35,31 @@ let currentUtterance = null;
 let isSpeaking = false;
 let currentSpeechRate = 1.0;
 
-// Map Themes (Free, zero-API-key tile providers)
+// Map Themes (100% Free, Zero-API-Key, Zero Watermarks)
 const MAP_THEMES = [
   {
-    name: 'Midnight Dark',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; OpenStreetMap',
-    label: 'Midnight'
+    name: 'Midnight Vector',
+    url: null, // Pure vector rendering on deep oceanic gradient - 100% offline, zero watermarks!
+    attribution: 'Natural Earth Vector Cartography',
+    label: 'Vector Dark'
   },
   {
-    name: 'Cyberpunk Neon',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
-    label: 'Cyberpunk'
-  },
-  {
-    name: 'Clean Daylight',
-    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; OpenStreetMap',
-    label: 'Daylight'
+    name: 'Esri Dark Canvas',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    attribution: '&copy; Esri &copy; DeLorme &copy; NAVTEQ',
+    label: 'Dark Canvas'
   },
   {
     name: 'Satellite Earth',
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: '&copy; <a href="https://www.esri.com/">Esri</a>',
+    attribution: '&copy; Esri, Maxar, Earthstar Geographics',
     label: 'Satellite'
+  },
+  {
+    name: 'OpenStreetMap',
+    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; OpenStreetMap contributors',
+    label: 'OpenStreet'
   }
 ];
 
@@ -151,16 +151,23 @@ function initMap() {
 function applyTileLayer(themeIdx) {
   if (currentTileLayer) {
     map.removeLayer(currentTileLayer);
+    currentTileLayer = null;
   }
   const theme = MAP_THEMES[themeIdx];
-  currentTileLayer = L.tileLayer(theme.url, {
-    maxZoom: 19,
-    subdomains: 'abcd',
-    attribution: theme.attribution
-  }).addTo(map);
+  if (theme && theme.url) {
+    currentTileLayer = L.tileLayer(theme.url, {
+      maxZoom: 19,
+      attribution: theme.attribution
+    }).addTo(map);
+
+    // Keep country polygon boundaries on top of tiles
+    if (geojsonLayer) {
+      geojsonLayer.bringToFront();
+    }
+  }
 
   const themeLabel = document.getElementById('current-theme-label');
-  if (themeLabel) themeLabel.textContent = theme.label;
+  if (themeLabel && theme) themeLabel.textContent = theme.label;
 }
 
 function cycleMapTheme() {
